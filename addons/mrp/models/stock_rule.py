@@ -40,7 +40,46 @@ class StockRule(models.Model):
                 msg = _('There is no Bill of Material of type manufacture or kit found for the product %s. Please define a Bill of Material for this product.') % (procurement.product_id.display_name,)
                 raise UserError(msg)
 
-            productions_values_by_company[procurement.company_id.id].append(rule._prepare_mo_vals(*procurement, bom))
+            ###  correction FS mrp stok.rule du au probleme d'appel de la function: _prepare_mo_vals(*procurement, bom)
+            # productions_values_by_company[procurement.company_id.id].append(rule._prepare_mo_vals(*procurement, bom))
+            print("### debut modif fs mrp stok.rule du au probleme d'appel de la function: _prepare_mo_vals(*procurement, bom) ")
+            date_deadline = fields.Datetime.to_string(self._get_date_planned(procurement.product_id, procurement.company_id, procurement.values))
+            mo_values = {
+               'origin': procurement.origin,
+               'product_id': procurement.product_id.id,
+               'product_qty': procurement.product_qty,
+               'product_uom_id': procurement.product_uom.id,
+               'location_src_id': rule.location_src_id.id or rule.picking_type_id.default_location_src_id.id or procurement.location_id.id,
+               'location_dest_id': procurement.location_id.id,
+               'bom_id': bom.id,
+               'date_deadline': date_deadline,
+               'date_planned_finished': fields.Datetime.from_string(procurement.values['date_planned']),
+               'date_planned_start': date_deadline,
+               'procurement_group_id': False,
+               'propagate_cancel': rule.propagate_cancel,
+               'propagate_date': rule.propagate_date,
+               'propagate_date_minimum_delta': rule.propagate_date_minimum_delta,
+               'orderpoint_id': procurement.values.get('orderpoint_id', False) and procurement.values.get('orderpoint_id').id,
+               'picking_type_id': rule.picking_type_id.id or procurement.values['warehouse_id'].manu_type_id.id,
+               'company_id': procurement.company_id.id,
+               'move_dest_ids': procurement.values.get('move_dest_ids') and [(4, x.id) for x in procurement.values['move_dest_ids']] or False,
+               'user_id': False,
+            }
+            # Use the procurement group created in _run_pull mrp override
+            # Preserve the origin from the original stock move, if available
+            if procurement.location_id.get_warehouse().manufacture_steps == 'pbm_sam':
+              if procurement.values.get('move_dest_ids') and procurement.values.get('group_id') and procurement.values['move_dest_ids'][0].origin != procurement.values['group_id'].name:
+                origin = procurement.values['move_dest_ids'][0].origin
+                mo_values.update({
+                    'name': procurement.values['group_id'].name,
+                    'procurement_group_id': procurement.values['group_id'].id,
+                    'origin': origin,
+                })
+
+            print("#### sortie test production_value ****")
+            # productions_values_by_company[procurement.company_id.id].append(rule._prepare_mo_vals(*procurement, bom))
+            productions_values_by_company[procurement.company_id.id].append(mo_values)
+            print("### fin modif fs stok.rule ")
 
         for company_id, productions_values in productions_values_by_company.items():
             # create the MO as SUPERUSER because the current user may not have the rights to do it (mto product launched by a sale for example)
